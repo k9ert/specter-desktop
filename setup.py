@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
-    name="specter-desktop",
+    name="cryptoadvance.specter",
     version="v0.0.11",
     author="Stepan Snigirev",
     author_email="snigirev.stepan@gmail.com",
