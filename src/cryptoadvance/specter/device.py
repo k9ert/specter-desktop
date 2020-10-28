@@ -1,6 +1,9 @@
 import json
 from .key import Key
-from .helpers import fslock
+from .persistence import read_json_file, write_json_file
+import logging
+
+logger = logging.getLogger()
 
 
 class Device:
@@ -14,6 +17,7 @@ class Device:
     hwi_support = False
     supports_hwi_toggle_passphrase = False
     supports_hwi_multisig_display_address = False
+    hot_wallet = False
 
     def __init__(self, name, alias, keys, fullpath, manager):
         """
@@ -35,16 +39,13 @@ class Device:
         return {}
 
     @classmethod
-    def from_json(cls, device_dict, manager,
-                  default_alias='', default_fullpath=''):
-        name = device_dict['name'] if 'name' in device_dict else ''
-        alias = (device_dict['alias']
-                 if 'alias' in device_dict
-                 else default_alias)
-        keys = [Key.from_json(key_dict) for key_dict in device_dict['keys']]
-        fullpath = (device_dict['fullpath']
-                    if 'fullpath' in device_dict
-                    else default_fullpath)
+    def from_json(cls, device_dict, manager, default_alias="", default_fullpath=""):
+        name = device_dict["name"] if "name" in device_dict else ""
+        alias = device_dict["alias"] if "alias" in device_dict else default_alias
+        keys = [Key.from_json(key_dict) for key_dict in device_dict["keys"]]
+        fullpath = (
+            device_dict["fullpath"] if "fullpath" in device_dict else default_fullpath
+        )
         return cls(name, alias, keys, fullpath, manager)
 
     @property
@@ -58,12 +59,7 @@ class Device:
         }
 
     def _update_keys(self):
-        with fslock:
-            with open(self.fullpath, "r") as f:
-                content = json.load(f)
-            content['keys'] = [key.json for key in self.keys]
-            with open(self.fullpath, "w") as f:
-                json.dump(content, f, indent=4)
+        write_json_file(self.json, self.fullpath)
         self.manager.update()
 
     def remove_key(self, key):
@@ -76,6 +72,12 @@ class Device:
                 self.keys.append(key)
         self._update_keys()
 
+    def rename(self, new_name):
+        logger.info("Renaming {}".format(self.alias))
+        self.name = new_name
+        write_json_file(self.json, self.fullpath)
+        self.manager.update()
+
     def wallets(self, wallet_manager):
         wallets = []
         for wallet in wallet_manager.wallets.values():
@@ -85,13 +87,12 @@ class Device:
 
     def set_type(self, device_type):
         self.device_type = device_type
-        with fslock:
-            with open(self.fullpath, "w") as f:
-                json.dump(self.json, f, indent=4)
+
+        write_json_file(self.json, self.fullpath)
         self.manager.update()
 
-    def key_types(self, network='main'):
-        test = network != 'main'
+    def key_types(self, network="main"):
+        test = network != "main"
         return [key.key_type for key in self.keys if (key.is_testnet == test)]
 
     def __eq__(self, other):

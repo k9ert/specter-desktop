@@ -37,12 +37,12 @@
 				<i class="tool-tip__icon">i</i>
 				<p class="tool-tip__info">
 					<span class="info">
-						<span class="info__title">Funds waiting in usigned transactions<br><br></span>
+						<span class="info__title">Funds waiting in unsigned transactions<br><br></span>
 						To make funds available to spend in new transactions, just click on the "Unsigned" tab and delete unsigned transaction you have no need for.
 					</span>
 				</p>
 			</div>
-			<p style="display: inline; margin: auto;">&nbsp;You have waiting {{wallet.locked_amount | btcunitamount}} {% if specter.unit == 'sat' %}sats{% else %}{% if specter.chain !='main' %}t{%endif%}BTC{% endif %} still in usigned transactions.</p>
+			<p style="display: inline; margin: auto;">&nbsp;You have waiting {{wallet.locked_amount | btcunitamount}} {% if specter.unit == 'sat' %}sats{% else %}{% if specter.chain !='main' %}t{%endif%}BTC{% endif %} still in unsigned transactions.</p>
 			<br><br>
 		{% endif %}
 		<div class="card">
@@ -69,10 +69,9 @@
 					<label><input type="radio" class="inline" style="margin: 0 10px 0 20px;" name="ui_option" value="text" onclick="toggleSendUIType(this);" {% if ui_option != 'ui' %}checked{% endif %}>text</label>
 				</div><br>
 				{% include "wallet/send/new/components/fee_selection.jinja" %}
-				{% set unspents = wallet.rpc.listunspent(0) %}
 				<div class="row" id="coin-selection-row" style="margin-top: 30px;">
 					<button id="add-recipient" style="width: 200px; height: 38px;" type="button" class="btn" onclick="addRecipient()"><svg width="20" height="20" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> Add another recipient </button>
-				{% if unspents | length > 0 %}
+				{% if wallet.utxo | length > 0 %}
 					<button style="width: 200px; height: 38px; margin-left: 10px;" id="coinselect" type="button" class="btn" onclick="toggleExpand()">Select coins manually</button>
 				{% endif %}
 				</div><br>
@@ -102,7 +101,7 @@
 				<div class="row">
 					<input type="text" id="address_${i}" name="address_${i}" oninput="validateForm()"> &nbsp;
 					<qr-scanner id="address-scan-${i}">
-						<a slot="button" class="btn" style="height: 35px;"><img src="/static/img/qr_tiny.svg"/> Scan</a>
+						<a slot="button" class="btn" style="height: 35px;"><img src="{{ url_for('static', filename='img/qr_tiny.svg') }}"/> Scan</a>
 					</qr-scanner>
 				</div>
 				<br>
@@ -204,11 +203,11 @@
 		function calculateConvertedUnit(i) {
 			let amountInput = document.getElementById('amount_' + i);
 			amounts[i] = parseFloat(amountInput.value);
-			let convertedAmount = Number.parseFloat(amounts[i] / (units[i] == 'sat' ? 1e8 : 1e-8)).toFixed((units[i] == 'sat' ? 8 : 0));
+			let convertedAmount = parseFloat(Number.parseFloat(amounts[i] / (units[i] == 'sat' ? 1e8 : 1e-8)).toFixed((units[i] == 'sat' ? 8 : 0)));
 			if (convertedAmount == 'NaN') {
 				convertedAmount = '-'
 			}
-			document.getElementById('converted_unit_amount_' + i).innerHTML = convertedAmount;
+			document.getElementById('converted_unit_amount_' + i).innerHTML = (isNaN(convertedAmount) ? '-' : convertedAmount);
 
 			document.getElementById('btc_amount_' + i).value = (units[i] == 'btc' ? amounts[i] : amounts[i] / 1e8);
 
@@ -216,7 +215,7 @@
 		}
 
 		function isAboveWalletBalance(unit, amount) {
-			return (unit == 'sat' ? amount / 1e8 : amount.toFixed(8)) > parseFloat('{{ wallet.full_available_balance }}').toFixed(8);
+			return (unit == 'sat' ? amount / 1e8 : parseFloat(amount.toFixed(8))) > parseFloat(parseFloat('{{ wallet.full_available_balance }}').toFixed(8));
 		}
 
 		function isInvalidValue(unit, amount){
@@ -250,7 +249,7 @@
 			if (units[i] == 'sat') {
 				maxAmount = Math.round(maxAmount);
 			} else {
-				maxAmount = maxAmount.toFixed(8);
+				maxAmount = parseFloat(maxAmount.toFixed(8));
 			}
 			if (maxAmount < 0) {
 				maxAmount = 0;
@@ -426,8 +425,9 @@
 				formData.append("estimate_fee", true);
 				formData.append("action", "createpsbt");
 
+				let url="{{ url_for('wallet_sendnew', wallet_alias=wallet.alias) }}"
 				const response = await fetch(
-					'/wallets/{{ wallet.alias }}/send/new',
+					url,
 					{
 						method: 'POST',
 						body: formData

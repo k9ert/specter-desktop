@@ -6,6 +6,7 @@ import threading
 import time
 import os
 import requests
+import importlib_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +27,12 @@ class VersionChecker:
             self.thread.start()
 
     def stop(self):
+        logger.info("version checker stopped.")
         self.running = False
 
     @property
     def info(self):
-        return {
-            "current": self.current,
-            "latest": self.latest,
-            "upgrade": self.upgrade,
-        }
+        return {"current": self.current, "latest": self.latest, "upgrade": self.upgrade}
 
     def loop(self, dt=3600):
         """Checks for updates once per hour"""
@@ -50,12 +48,14 @@ class VersionChecker:
         Returns latest = "unknown" if fetch failed.
         """
         version_file = "version.txt"
-        if getattr(sys, 'frozen', False):
-            version_file = os.path.join(sys._MEIPASS, 'version.txt')
+        if getattr(sys, "frozen", False):
+            version_file = os.path.join(sys._MEIPASS, "version.txt")
         with open(version_file) as f:
             current = f.read().strip()
         try:
-            releases = requests.get("https://api.github.com/repos/cryptoadvance/specter-desktop/releases").json()
+            releases = requests.get(
+                "https://api.github.com/repos/cryptoadvance/specter-desktop/releases"
+            ).json()
             latest = "unknown"
             for release in releases:
                 if release["prerelease"] or release["draft"]:
@@ -67,36 +67,30 @@ class VersionChecker:
         return current, latest
 
     def get_pip_version(self):
-        latest = str(subprocess.run([
-            sys.executable, '-m', 'pip',
-            'install', f'{self.name}==random'],
-            capture_output=True, text=True))
-        latest = latest[latest.find(
-            '(from versions:')+15:]
-        latest = latest[:latest.find(')')]
-        latest = latest.replace(' ', '').split(',')[-1]
+        try:
+            releases = (
+                requests.get("https://pypi.org/pypi/cryptoadvance.specter/json")
+                .json()["releases"]
+                .keys()
+            )
 
-        current = str(subprocess.run([
-            sys.executable, '-m', 'pip',
-            'show', f'{self.name}'],
-            capture_output=True, text=True))
-        current = current[current.find(
-            'Version:')+8:]
-        current = current[:current.find(
-            '\\n')].replace(' ', '')
-        # master?
-        if current == 'vx.y.z-get-replaced-by-release-script':
-            current = 'custom'
-            # no need to check upgrades
-            self.running = False
+            latest = list(releases)[-1]
+        except:
+            latest = "unknown"
+
+        current = importlib_metadata.version("cryptoadvance.specter")
+        # check if it's installed from master
+        if current == "vx.y.z-get-replaced-by-release-script":
+            current = "custom"
+
         return current, latest
 
     def get_version_info(self):
-        '''
+        """
         Returns a triple of the current version
         of the pip-package cryptoadvance.specter and
         the latest version and whether you should upgrade.
-        '''
+        """
         # check if we have version.txt file
         # this is the case for binaries
         current = "unknown"
@@ -115,12 +109,17 @@ class VersionChecker:
             logger.error(exc)
 
         # check that both current and latest versions match the pattern
-        if (re.search(r"v?([\d+]).([\d+]).([\d+]).*", current) and
-            re.search(r"v?([\d+]).([\d+]).([\d+]).*", latest)):
-            return (
-                current,
-                latest,
-                # check without leading v so v1.2.3 = 1.2.3
-                latest.replace("v","") != current.replace("v","")
-            )
+        # vA.B.C or just A.B.C
+        # For vA.B.C-preX or something like that we don't show notification
+        if re.search(r"v?([\d+]).([\d+]).([\d+])$", current):
+            if re.search(r"v?([\d+]).([\d+]).([\d+])$", latest):
+                return (
+                    current,
+                    latest,
+                    # check without leading v so v1.2.3 = 1.2.3
+                    latest.replace("v", "") != current.replace("v", ""),
+                )
+        # if current version is not A.B.C - stop periodic checks
+        else:
+            self.stop()
         return current, latest, False

@@ -1,11 +1,12 @@
 import os
 import json
 import logging
-from .helpers import alias, load_jsons, fslock
+from .helpers import alias, load_jsons
 from .rpc import get_default_datadir
 
 from .devices import __all__ as device_classes
 from .devices.generic import GenericDevice  # default device type
+from .persistence import write_device, delete_json_file, delete_folder
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,10 @@ def get_device_class(device_type):
 
 
 class DeviceManager:
-    ''' A DeviceManager mainly manages the persistence of a device-json-structures
-        compliant to helper.load_jsons
-    '''
+    """A DeviceManager mainly manages the persistence of a device-json-structures
+    compliant to helper.load_jsons
+    """
+
     # of them via json-files in an empty data folder
     def __init__(self, data_folder):
         self.update(data_folder=data_folder)
@@ -38,11 +40,13 @@ class DeviceManager:
         devices_files = load_jsons(self.data_folder, key="name")
         for device_alias in devices_files:
             fullpath = os.path.join(self.data_folder, "%s.json" % device_alias)
-            devices[devices_files[device_alias]["name"]] = get_device_class(devices_files[device_alias]["type"]).from_json(
+            devices[devices_files[device_alias]["name"]] = get_device_class(
+                devices_files[device_alias]["type"]
+            ).from_json(
                 devices_files[device_alias],
                 self,
                 default_alias=device_alias,
-                default_fullpath=fullpath
+                default_fullpath=fullpath,
             )
         self.devices = devices
 
@@ -65,10 +69,7 @@ class DeviceManager:
                 non_dup_keys.append(key)
         keys = non_dup_keys
         device = get_device_class(device_type)(name, device_alias, keys, fullpath, self)
-        with fslock:
-            with open(fullpath, "w") as file:
-                file.write(json.dumps(device.json, indent=4))
-
+        write_device(device, fullpath)
         self.update()  # reload files
         return device
 
@@ -83,14 +84,21 @@ class DeviceManager:
         device,
         wallet_manager=None,
         bitcoin_datadir=get_default_datadir(),
-        chain='main'
+        chain="main",
     ):
-        os.remove(device.fullpath)
+        delete_json_file(device.fullpath)
         # if device can delete itself - call it
-        if hasattr(device,'delete'):
+        if hasattr(device, "delete"):
             device.delete(wallet_manager, bitcoin_datadir=bitcoin_datadir, chain=chain)
         self.update()
 
     @property
     def supported_devices(self):
         return device_classes
+
+    def delete(self, specter):
+        """Deletes all the devices"""
+        for d in self.devices:
+            device = self.devices[d]
+            self.remove_device(device)
+        delete_folder(self.data_folder)

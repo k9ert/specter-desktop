@@ -10,6 +10,7 @@ git clone https://github.com/cryptoadvance/specter-desktop.git
 cd specter-desktop
 virtualenv --python=python3 .env
 source .env/bin/activate
+pip3 install -r requirements.txt --require-hashes
 pip3 install -e .
 ```
 
@@ -24,8 +25,8 @@ python3 -m cryptoadvance.specter server
 Run the tests (still very limited):
 
 ```sh
-pip3 install -e .
 pip3 install -r test_requirements.txt
+pip3 install -e .
 
 # needs a bitcoind on your path
 pytest 
@@ -43,6 +44,8 @@ pytest tests/test_specter -k Manager
 ```
 
 # Developing on tests
+## bitcoin-specific stuff
+
 There are some things worth taking a note here, especially if you rely on a specific state on the blockchain for your tests. Bitcoind is started only once for all the tests. If you run 
 it each time it's starting with the genesis-block. This has some implications:
 * The [halving-interval for regtest](https://github.com/bitcoin/bitcoin/blob/99813a9745fe10a58bedd7a4cb721faf14f907a4/src/chainparams.cpp#L258) is only 150-blocks
@@ -50,6 +53,16 @@ it each time it's starting with the genesis-block. This has some implications:
 * This combination results in that you can't rely on how many coins get mined if you want some testcoin on your address
 * This also means that it makes a huge difference whether you run a test standalone or together with all other tests
 * Depending on whether you do one or the other, you cannot rely on transactionIDs. So if you run a test standalone twice, you can assert txids but you can't any longer when you run all the tests
+
+# Flask specific stuff
+
+Other than Django, Flask is not opionoated at all. You can do all sorts of things and it's quite difficult to judge whether you're doing it right.
+
+One strange thing which we're doing to get the tests working is forcing the reload of the controller-code (if necessary) [here](https://github.com/cryptoadvance/specter-desktop/blob/master/src/cryptoadvance/specter/server.py#L83-L90).
+
+The if-clause might be quite brittle which would result in very strange 404 in test_controller.
+Check the [archblog](./docs/archblog.md) for a better explanation.
+If Someone could figure out a better way to do that avoiding this strange this ... very welcome.
 
 # More on the bitcoind requirements
 Developing against a bitcoind-API makes most sense with the [Regtest Mode](https://bitcoin.org/en/developer-examples#regtest-mode). Depending on preferences and usecases, there are three major ways on how this dependency can be fullfilled:
@@ -140,6 +153,13 @@ If you see this to need some improvements, please make it in small steps and exp
 
 ## Some words about dependencies
 As a quite young project, we don't have many dependencies yet and as a quite secure-aware use-case, we don't even want to have too many dependencies. That's sometimes the reason that we decide to roll our own rather then taking in new dependencies. This is especially true for javascript. We prefer plain javascript over any kind of frameworks.
+
+If you update `requirements.in` you will need to run the following to update `requirements.txt`:
+```sh
+$ pip-compile --generate-hashes requirements.in
+```
+
+This is good for both security and reproducibility.
 
 ## Some words specific to the frontend
 We're aware that currently the app is not very compatible on different browsers and there is no clear strategy yet on how (and whether at all) to fix that. High level consultancy help on that would be appreciated even so (or especially when) you take the above security/dependency requirements into account.

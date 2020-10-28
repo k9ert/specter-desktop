@@ -114,7 +114,7 @@
 						<b>Transaction id:</b><br>
 						{{ explorer_link('tx', input['txid'], input['txid'], specter.explorer) }}
 						(Output #{{ input['vout'] }})<br>
-						{% set tx = wallet.rpc.gettransaction(input['txid']) %}
+						{% set tx = wallet.gettransaction(input['txid']) %}
 						<b>Address:</b>
 						{{ explorer_link('address', tx['details'][0]['address'], tx['details'][0]['address'], specter.explorer) }}
 						<br>
@@ -138,15 +138,25 @@
 					</p>
 				{% endfor %}
 				Raw PSBT:<textarea id="raw-psbt" disabled style="background-color: #131a24;">{{ psbt['base64'] }}</textarea>
-				<button type="button" id="copy-raw-psbt-btn" class="btn" style="margin: auto;">Copy Raw PSBT</button>
+				<div class="row" style="margin:auto">
+					<a id="download-psbt-btn" class="btn"
+					download="binary_{{ psbt['tx']['hash'] }}.psbt" href="data:application/octet-stream;base64;content-disposition=attachment,{{ psbt['base64'] }}">
+					<img src="{{url_for('static', filename='img/download.svg')}}"/> Download binary</a>&nbsp;
+					<a id="download-psbt-btn" class="btn"
+					download="base64_{{ psbt['tx']['hash'] }}.psbt" href="data:text/plain;content-disposition=attachment,{{ psbt['base64'] }}">
+					<img src="{{url_for('static', filename='img/download.svg')}}"/> Download base64</a>&nbsp;
+					<a id="copy-raw-psbt-btn" class="btn">Copy Raw PSBT</a>&nbsp;
+					<a id="show-qr-psbt-btn" class="btn">
+					<img src="{{url_for('static', filename='img/qr_tiny.svg')}}"/> Show QR code</a>
+				</div>
 			</div>
 		</div>
 
 		<div id="signing_container" class="signing_container flex-column {% if psbt['raw'] %}hidden{% endif %}" style="text-align: center;">
 			<p style="margin-bottom: 15px; margin-top: 0px;">Sign transaction with your:</p>
 			{% for device in wallet.devices %}
-				<button type="button" class="btn signing-column-btn" id="{{ device.alias }}_tx_sign_btn" {{ 'disabled style="background-color:#303c49;"' if device.name in psbt["devices_signed"] else '' }}>
-					{{ device.name }} {% if device.name in psbt['devices_signed'] %} (&#10004;) {% endif %}
+				<button type="button" class="btn signing-column-btn" id="{{ device.alias }}_tx_sign_btn" {{ 'disabled style="background-color:#303c49;"' if device.alias in psbt["devices_signed"] else '' }}>
+					{{ device.name }} {% if device.alias in psbt['devices_signed'] %} (&#10004;) {% endif %}
 				</button>
 			{% endfor %}
 		</div>
@@ -170,6 +180,14 @@
 			<button id="deletepsbt_btn" type="submit" name="action" value="deletepsbt" class="btn danger centered" style="margin-left: 5px;">Delete Transaction</button>
 		</div>
 	</form>
+
+<form id="raw-psbt-qr-container" class="flex-center flex-column hidden">
+    <div class="row" style="min-height: 400px;">
+        <span style="margin: auto;" id="raw-psbt-qr-holder">
+            <qr-code id="raw-psbt-qr" class='center' value="{{ psbt['base64'] }}" width="400" scalable></qr-code>
+        </span>
+    </div>
+</form>
 {% endblock %}
 
 
@@ -185,6 +203,11 @@
 		copyrawPSBTbtn.addEventListener("click", function() {
 			var raw_psbt = document.getElementById("raw-psbt");
 			copyText(raw_psbt.value, "Copied PSBT")
+		});
+		document.getElementById("show-qr-psbt-btn").addEventListener("click", 
+			(e)=>{
+                e.preventDefault();
+                showPageOverlay('raw-psbt-qr-container');
 		});
 		document.addEventListener("DOMContentLoaded", function(){
 			var sendTxBtn = document.getElementById("send_tx_btn");
@@ -232,7 +255,7 @@
 		}
 
 		async function combine(psbt1) {
-			let url = "/wallets/{{ wallet.alias }}/combine/";
+			let url = "{{ url_for('combine', wallet_alias=wallet.alias) }}";
 
 			var formData = new FormData();
 			formData.append("psbt0", psbt0);
@@ -273,7 +296,11 @@
 					}
 					// add signatures to raw-psbt textarea for export
 					document.getElementById("raw-psbt").value = psbt0;
-
+					// download file
+					document.getElementById("download-psbt-btn").href = "data:text/plain;content-disposition=attachment,"+psbt0;
+					// qr code
+					document.getElementById("raw-psbt-qr-holder").innerHTML = `            <qr-code id="raw-psbt-qr" class='center' value="${psbt0}" width="400" scalable></qr-code>`;
+					document.getElementById("raw-psbt-qr").setAttribute("value",psbt0);
 				}
 				console.log(jsonResponse);
 				if (jsonResponse.complete) {
@@ -295,7 +322,7 @@
 
 		async function broadcastLocal(tx) {
 			showNotification("Sending transaction...");
-			let url="/wallets/{{wallet.alias}}/broadcast/";
+			let url="{{ url_for('broadcast', wallet_alias=wallet.alias) }}";
 
 			var formData = new FormData();
 			formData.append("tx", tx);
