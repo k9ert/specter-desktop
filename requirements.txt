@@ -8,9 +8,9 @@ base58==2.0.1 \
     --hash=sha256:365c9561d9babac1b5f18ee797508cd54937a724b6e419a130abad69cec5ca79 \
     --hash=sha256:447adc750d6b642987ffc6d397ecd15a799852d5f6a1d308d384500243825058 \
     # via bitbox02
-bitbox02==4.1.0 \
-    --hash=sha256:1af95952d67b74c80ccc0588e0aee983c764960da637bd24bc41a1cb89d5e127 \
-    --hash=sha256:73a35594162f32897dd2b1880f0cfaa42922acd1c2d7f4cf3d94b8333329c931 \
+bitbox02==5.1.0 \
+    --hash=sha256:0562bc93d87afd89879e130c60c8dbfaffa8a1c3deff01201702939c9594d242 \
+    --hash=sha256:7d0efad2516604c0275452506f415730ac9e790569dedc79668b67db2ed13cdf \
     # via -r requirements.in, hwi
 certifi==2019.9.11 \
     --hash=sha256:e4f3620cfea4f83eedc95b24abd9cd56f3c4b146dd0177e83a21b4eb49e21e50 \
