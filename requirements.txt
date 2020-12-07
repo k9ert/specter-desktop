@@ -12,9 +12,9 @@ bitbox02==4.1.0 \
     --hash=sha256:1af95952d67b74c80ccc0588e0aee983c764960da637bd24bc41a1cb89d5e127 \
     --hash=sha256:73a35594162f32897dd2b1880f0cfaa42922acd1c2d7f4cf3d94b8333329c931 \
     # via -r requirements.in, hwi
-certifi==2019.9.11 \
-    --hash=sha256:e4f3620cfea4f83eedc95b24abd9cd56f3c4b146dd0177e83a21b4eb49e21e50 \
-    --hash=sha256:fd7c7c74727ddcf00e9acd26bba8da604ffec95bf1c2144e67aff7a8b50e6cef \
+certifi==2020.12.5 \
+    --hash=sha256:1a4995114262bffbc2413b159f2a1a480c969de6e6eb13ee966d470af86af59c \
+    --hash=sha256:719a74fb9e33b9bd44cc7f3a8d94bc35e4049deebe19ba7d8e108280cfd59830 \
     # via -r requirements.in, requests
 cffi==1.14.3 \
     --hash=sha256:005f2bfe11b6745d726dbb07ace4d53f057de66e336ff92d61b8c7e9c8f4777d \
