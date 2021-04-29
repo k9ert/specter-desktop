@@ -1,0 +1,54 @@
+version: 2
+updates:
+- package-ecosystem: pip
+  directory: "/"
+  schedule:
+    interval: daily
+    time: "04:00"
+  open-pull-requests-limit: 10
+  ignore:
+  - dependency-name: importlib-metadata
+    versions:
+    - 3.10.0
+    - 3.10.1
+    - 3.4.0
+    - 3.6.0
+    - 3.7.0
+    - 3.7.2
+    - 3.7.3
+    - 3.9.0
+    - 4.0.0
+  - dependency-name: pre-commit
+    versions:
+    - 2.10.0
+    - 2.10.1
+    - 2.11.0
+    - 2.11.1
+    - 2.12.0
+  - dependency-name: python-dotenv
+    versions:
+    - 0.15.0
+    - 0.16.0
+  - dependency-name: pyinstaller
+    versions:
+    - "4.2"
+  - dependency-name: jinja2
+    versions:
+    - 2.11.3
+  - dependency-name: pip-tools
+    versions:
+    - 5.5.0
+    - 6.0.0
+    - 6.0.1
+  - dependency-name: docker
+    versions:
+    - 4.4.1
+    - 4.4.2
+    - 4.4.3
+    - 4.4.4
+  - dependency-name: cryptography
+    versions:
+    - 3.3.2
+  - dependency-name: bitbox02
+    versions:
+    - 5.1.0
