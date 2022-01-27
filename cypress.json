@@ -6,6 +6,7 @@
       "spec_configures_nodes.js",
       "spec_node_configured.js",
       "spec_wallet_send.js",
+      "spec_wallet_send2.js",
       "spec_wallet_utxo.js",
       "spec_elm_single_segwit_wallet.js",
       "spec_elm_multi_segwit_wallet.js"
