@@ -137,6 +137,7 @@ class Service:
 
         addresses = []
         start_index = wallet.address_index + 1
+        # ToDo: Check from the last reserved address instead
         for i in range(start_index, start_index + (2 * num_addresses), 2):
             address = wallet.get_address(i)
 
