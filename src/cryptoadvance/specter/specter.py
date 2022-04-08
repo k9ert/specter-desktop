@@ -46,7 +46,7 @@ from .util.checker import Checker
 from .util.version import VersionChecker
 from .util.price_providers import update_price
 from .util.setup_states import SETUP_STATES
-from .util.tor import get_tor_daemon_suffix
+from .util.tor import create_tor_enabled_requests_session, get_tor_daemon_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -639,20 +639,9 @@ class Specter:
         return self.user_config.get("autologout_timeout_hours", 4)
 
     def requests_session(self, force_tor=False):
-        requests_session = requests.Session()
         if self.only_tor or force_tor:
-            proxy_url = self.proxy_url
-            proxy_parsed_url = urlparse(self.proxy_url)
-            proxy_url = proxy_parsed_url._replace(
-                netloc="{}:{}@{}".format(
-                    str(random.randint(10000, 0x7FFFFFFF)),
-                    "random",
-                    proxy_parsed_url.netloc,
-                )
-            ).geturl()
-            requests_session.proxies["http"] = proxy_url
-            requests_session.proxies["https"] = proxy_url
-        return requests_session
+            return create_tor_enabled_requests_session(self.proxy_url)
+        return requests.Session()
 
     def specter_backup_file(self):
         memory_file = BytesIO()
