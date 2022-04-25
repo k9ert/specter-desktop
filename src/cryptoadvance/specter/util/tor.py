@@ -1,5 +1,8 @@
 import os, platform
+from random import random
+from urllib.parse import urlparse
 from stem.control import Controller
+import requests
 
 
 def get_tor_daemon_suffix():
@@ -8,6 +11,21 @@ def get_tor_daemon_suffix():
     elif platform.system() == "Windows":
         return ".exe"
     return ""
+
+
+def create_tor_enabled_requests_session(proxy_url):
+    requests_session = requests.Session()
+    proxy_parsed_url = urlparse(proxy_url)
+    proxy_url = proxy_parsed_url._replace(
+        netloc="{}:{}@{}".format(
+            str(random.randint(10000, 0x7FFFFFFF)),
+            "random",
+            proxy_parsed_url.netloc,
+        )
+    ).geturl()
+    requests_session.proxies["http"] = proxy_url
+    requests_session.proxies["https"] = proxy_url
+    return requests_session
 
 
 def start_hidden_service(app):

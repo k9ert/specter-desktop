@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 OZ_TO_G = 28.3495231
 
+# This structure specifies which currencies are supported via which ticker-providers
 currency_mapping = {
     "usd": {
         "symbol": "$",
@@ -145,11 +146,12 @@ def get_price_at(specter, timestamp="now"):
                         "https://www.bitstamp.net/api/v2/ticker/btc{}".format(currency),
                     )["last"]
                 else:
-                    price = requests_session.get(
+                    price = failsafe_request_get(
+                        requests_session,
                         "https://www.bitstamp.net/api/v2/ohlc/btc{}/?limit=1&step=86400&start={}".format(
                             currency, timestamp
-                        )
-                    ).json()["data"]["ohlc"][0]["close"]
+                        ),
+                    )["data"]["ohlc"][0]["close"]
             elif specter.price_provider.startswith("coindesk"):
                 if timestamp == "now":
                     price = failsafe_request_get(
@@ -227,6 +229,9 @@ def failsafe_request_get(requests_session, url):
         if json_response.get("errors"):
             raise SpecterError(f"JSON error: {json_response}")
         raise SpecterError(f"HttpError {httpe.response.status_code} for {url}")
+    except JSONDecodeError as jde:
+        logger.error(f"JSONDecodeError while trying to parse: {response.text}")
+        raise SpecterError(f"The service returned {response.text}")
     except Exception as e:
         handle_exception(e)
         raise SpecterError(e)
