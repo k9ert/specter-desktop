@@ -102,6 +102,7 @@ def fees_old(blocks):
 
 @wallets_endpoint_api.route("/get_new_notifications", methods=["GET"])
 @login_required
+@app.csrf.exempt
 def get_new_notifications():
     """
     Returns all notifications currently waiting in the buffer to be displayed. The datastructure is like:
@@ -134,7 +135,9 @@ def get_new_notifications():
     ) in app.specter.user_manager.get_user().notification_manager.ui_notifications:
         if ui_notification.name in {"WebAPI", "js_message_box", "js_console"}:
             notifications = ui_notification.read_and_clear_js_notification_buffer()
+
             if notifications:
+                logger.debug(f"handing out {notifications}")
                 js_notifications_dict[ui_notification.name] = notifications
 
     return json.dumps(js_notifications_dict, default=myjsonconverter)
@@ -142,6 +145,7 @@ def get_new_notifications():
 
 @wallets_endpoint_api.route("/create_notification", methods=["POST"])
 @login_required
+@app.csrf.exempt
 def create_notification():
     """
     The request.form must contain a dict. Only 'title' is mandatory
@@ -157,27 +161,21 @@ def create_notification():
 
     If a value is itself a list or dict (like target_uis) it has to be in a json format.
     """
-    arguments = dict(request.form)
-    # try reading everything with json
-    for key in arguments:
-        try:
-            arguments[key] = json.loads(arguments[key])
-        except:
-            pass
-
-    logger.debug(f"wallets_endpoint_api create_notification with arguments {arguments}")
-
-    if "title" not in arguments or not arguments["title"]:
-        return jsonify(
-            success=False,
-            error="The create_notification POST request must contain a 'title'",
-        )
-
-    return jsonify(
-        app.specter.user_manager.get_user().notification_manager.create_and_show(
-            **arguments
-        )
+    title = request.json["title"]
+    del request.json["title"]
+    logger.debug(
+        f"wallets_endpoint_api create_notification with titel {title} and arguments {request.json}"
     )
+    try:
+        result = (
+            app.specter.user_manager.get_user().notification_manager.create_and_show(
+                title, **request.json
+            )
+        )
+        logger.debug(f"create_notification result: {result}")
+        return {}
+    except SpecterError as e:
+        return jsonify(e)
 
 
 @wallets_endpoint_api.route("/wallet/<wallet_alias>/combine/", methods=["POST"])

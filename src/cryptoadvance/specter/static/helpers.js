@@ -88,6 +88,27 @@ async function send_request(url, method_str, csrf_token, formData) {
 	return await response.json();
 }
 
+async function send_request_json(url, method_str, csrf_token, formData) {
+
+	d = {
+			method: method_str,
+			headers: {
+				'Accept': 'application/json',
+				'Content-Type': 'application/json'
+			  }
+		}
+	if (method_str == 'POST') {
+		d['body'] = JSON.stringify(formData);
+	}
+	console.log(url+d)
+	const response = await fetch(url, d)
+	if(response.status != 200){
+		showError(await response.text());
+		console.log(`Error while calling ${url} with ${method_str} ${formData}`)
+		return
+	}
+	return await response.json();
+}
 
 function showNotification(msg, timeout=3000, type="primary") {
 	let el = document.createElement("message-box");

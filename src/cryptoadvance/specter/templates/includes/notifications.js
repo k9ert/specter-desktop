@@ -3,28 +3,9 @@
 
 /*  creating a notification from JS */
 async function requestCreateNotification(title, options){
-    function add(key){
-        if (key in options){
-            formData.append(key, options[key]);
-        }        
-    }
-    function addjson(key){
-        if (key in options){
-            formData.append(key, JSON.stringify( options[key]));
-        }        
-    }
-
     var url = "{{ url_for('wallets_endpoint_api.create_notification' ) }}";
-	var formData = new FormData();
-	formData.append("title", title)
-    add('timeout')
-    add('notification_type')
-    addjson('target_uis')
-    addjson('data')
-    add('body')
-    add('image')
-    add('icon') 
-    return send_request(url, 'POST', "{{ csrf_token() }}", formData)
+    options["title"] = title
+    return send_request_json(url, 'POST', "{{ csrf_token() }}", options )
 }
 
 
@@ -210,9 +191,9 @@ async function get_new_notifications(){
     }
 
     send_request(url, 'GET', "{{ csrf_token() }}").then(function (js_notifications_dict) {
-            //console.log(js_notifications_dict);
+            console.log(js_notifications_dict);
             for (var ui_name in js_notifications_dict) {
-            //console.log("obj." + ui_name + " = " + js_notifications_dict[ui_name]);
+            console.log("obj." + ui_name + " = " + js_notifications_dict[ui_name]);
             for (let i in js_notifications_dict[ui_name]) {  
                 show_notification(ui_name, js_notifications_dict[ui_name][i])  ;   
             }            
