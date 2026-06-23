@@ -1,0 +1,97 @@
+name: Test NIP-46 signing (fork-only smoke test)
+
+# Exercises the NIP-46 passphrase fetch + GPG sign + verify path in isolation,
+# without running the full release build matrix. Same fetch script + gpg
+# invocation as the real `create-release` job in release.yml.
+#
+# Trigger:  git tag nip46-test-<N> && git push origin nip46-test-<N>
+# REVERT THIS FILE before any PR to canonical upstream — fork-only.
+
+on:
+  push:
+    tags:
+      - 'nip46-test-*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test-nip46-sign:
+    name: NIP-46 fetch + GPG sign + verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HAVE_GPG_KEY: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sanity-check required secrets are present
+        run: |
+          if [ "${{ secrets.GPG_PRIVATE_KEY }}" = "" ]; then
+            echo "::error::GPG_PRIVATE_KEY secret missing"; exit 1
+          fi
+          if [ "${{ secrets.NOSTR_CI_NSEC }}" = "" ]; then
+            echo "::error::NOSTR_CI_NSEC secret missing"; exit 1
+          fi
+          echo "Secrets present."
+
+      - name: Build synthetic release-files
+        run: |
+          mkdir -p release-files
+          echo "fake_artifact_1" > release-files/a.zip
+          echo "fake_artifact_2" > release-files/b.dmg
+          cd release-files
+          sha256sum * > SHA256SUMS
+          echo "=== SHA256SUMS ==="
+          cat SHA256SUMS
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install nostr-sdk
+        run: pip install nostr-sdk==0.44.2
+
+      # --- mirror of the new release.yml step (keep this in sync) ---
+      - name: GPG sign checksums (passphrase via NIP-46)
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          NOSTR_CI_NSEC: ${{ secrets.NOSTR_CI_NSEC }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          FPR=$(gpg --list-secret-keys --with-colons --with-fingerprint 2>/dev/null | awk -F: '/^fpr/{print $10; exit}')
+          echo "Fingerprint: $FPR"
+          echo "${FPR}:6:" | gpg --import-ownertrust
+          KEY_ID=$(gpg --list-secret-keys --keyid-format long --with-colons 2>/dev/null | awk -F: '/^sec/{print $5; exit}')
+          echo "Signing with key: $KEY_ID"
+
+          echo "::group::Requesting GPG passphrase via NIP-46 (approve in your signer)"
+          PASSPHRASE=$(python3 utils/release_fetch_passphrase.py \
+            --config .github/signing/config.json \
+            --ciphertext .github/signing/passphrase.enc \
+            --timeout 300)
+          echo "::endgroup::"
+          echo "::add-mask::$PASSPHRASE"
+
+          cd release-files
+          printf '%s' "$PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+            --pinentry-mode loopback --default-key "$KEY_ID" --detach-sign --armor SHA256SUMS
+          cd ..
+          unset PASSPHRASE
+
+      - name: Verify detached signature
+        run: |
+          cd release-files
+          ls -l SHA256SUMS SHA256SUMS.asc
+          gpg --verify SHA256SUMS.asc SHA256SUMS
+          echo "::notice::Signature verified — NIP-46 fetch + GPG sign end-to-end OK."
+
+      - name: Upload signed artifacts (for inspection)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nip46-test-signed
+          path: |
+            release-files/SHA256SUMS
+            release-files/SHA256SUMS.asc
