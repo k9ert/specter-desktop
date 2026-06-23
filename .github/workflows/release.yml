@@ -594,11 +594,24 @@ jobs:
           cat SHA256SUMS
           cd ..
 
-      - name: GPG sign checksums
+      # Passphrase is fetched live from the operator's Nostr signer via NIP-46
+      # (requires a phone approval per release). It is NOT stored on GitHub —
+      # only .github/signing/passphrase.enc (NIP-44 ciphertext) lives in the repo.
+      - name: Set up Python for NIP-46 passphrase fetch
+        if: env.HAVE_GPG_KEY == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install nostr-sdk
+        if: env.HAVE_GPG_KEY == 'true'
+        run: pip install nostr-sdk==0.44.2
+
+      - name: GPG sign checksums (passphrase via NIP-46)
         if: env.HAVE_GPG_KEY == 'true'
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          NOSTR_CI_NSEC: ${{ secrets.NOSTR_CI_NSEC }}
         run: |
           echo "$GPG_PRIVATE_KEY" | gpg --batch --import
           # Set ultimate trust so GPG will use the key on a fresh runner
@@ -607,14 +620,22 @@ jobs:
           echo "${FPR}:6:" | gpg --import-ownertrust
           KEY_ID=$(gpg --list-secret-keys --keyid-format long --with-colons 2>/dev/null | awk -F: '/^sec/{print $5; exit}')
           echo "Signing with key: $KEY_ID"
+
+          # Ask the operator's signer to decrypt the passphrase (phone approval).
+          # Fail the release if it can't be obtained — never ship unsigned.
+          echo "::group::Requesting GPG passphrase via NIP-46 (approve in your signer)"
+          PASSPHRASE=$(python3 utils/release_fetch_passphrase.py \
+            --config .github/signing/config.json \
+            --ciphertext .github/signing/passphrase.enc \
+            --timeout 300)
+          echo "::endgroup::"
+          echo "::add-mask::$PASSPHRASE"
+
           cd release-files
-          if [ -n "$GPG_PASSPHRASE" ]; then
-            echo "$GPG_PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
-              --pinentry-mode loopback --default-key "$KEY_ID" --detach-sign --armor SHA256SUMS
-          else
-            gpg --batch --yes --pinentry-mode loopback --default-key "$KEY_ID" --detach-sign --armor SHA256SUMS
-          fi
+          printf '%s' "$PASSPHRASE" | gpg --batch --yes --passphrase-fd 0 \
+            --pinentry-mode loopback --default-key "$KEY_ID" --detach-sign --armor SHA256SUMS
           cd ..
+          unset PASSPHRASE
 
       - name: Generate release body
         run: |
