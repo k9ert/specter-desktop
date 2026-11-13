@@ -1,7 +1,7 @@
-name: Wine workaround probe (diagnostic, fork only)
+name: Wine hang sample (diagnostic, fork only)
 
-# Fork-only probe: can we fix the wine hang from *inside* the container
-# (personality/ASLR sysctl), or do we have to pin the runner image?
+# Fork-only: sample the hung wine process (syscall / stack / wchan) while it
+# hangs, to name the exact blocking point instead of guessing.
 
 on:
   workflow_dispatch:
@@ -10,26 +10,55 @@ permissions:
   contents: read
 
 jobs:
-  probe:
-    name: probe on ${{ matrix.image }}
+  sample:
+    name: sample on ${{ matrix.image }}
     strategy:
       fail-fast: false
       matrix:
         image: [ubuntu-24.04, ubuntu-26.04]
     runs-on: ${{ matrix.image }}
-    timeout-minutes: 10
+    timeout-minutes: 12
     container:
       image: electronuserland/builder:wine
+    env:
+      HOME: /tmp/electron-home
+
     steps:
-      - name: Probe
+      - uses: actions/checkout@v4
+
+      - name: Get winCodeSign vendor dir
+        run: |
+          mkdir -p "$HOME"
+          cd pyinstaller/electron && npm ci --ignore-scripts
+          AB="$PWD/node_modules/app-builder-bin/linux/x64/app-builder"
+          SZA="$PWD/node_modules/7zip-bin/linux/x64/7za"
+          chmod +x "$AB" "$SZA"
+          export SZA_PATH="$SZA"
+          timeout 120 "$AB" download-artifact --name winCodeSign-2.6.0 \
+            --url https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z
+
+      - name: Run wine in background and sample the hang
         run: |
           set +e
-          echo "=== setarch (ADDR_NO_RANDOMIZE via personality)"
-          setarch "$(uname -m)" -R true; echo "setarch exit=$?"
-          echo "=== sysctl write"
-          echo 28 > /proc/sys/vm/mmap_rnd_bits; echo "sysctl write exit=$?"
-          cat /proc/sys/vm/mmap_rnd_bits
-          echo "=== docker seccomp / caps"
-          grep -E "Seccomp|CapEff" /proc/self/status
-          echo "=== wine version check"
-          wine --version; echo "wine --version exit=$?"
+          V="$HOME/.cache/electron-builder/winCodeSign/winCodeSign-2.6.0"
+          cp "$V/rcedit-x64.exe" /tmp/t.exe
+          echo "=== launch $(date -u +%H:%M:%SZ)"
+          ( wine "$V/rcedit-ia32.exe" /tmp/t.exe --set-version-string ProductName Specter \
+              >/tmp/wine.log 2>&1 & echo $! > /tmp/wine.pid )
+          for s in 5 15 30 60; do
+            sleep $s
+            echo "=== sample at +${s}s cumulative"
+            ps -eo pid,ppid,stat,etime,wchan:28,args | grep -iE "wine|rcedit" | grep -v grep
+          done
+          echo "=== syscalls"
+          for p in $(pgrep -f "rcedit|wine"); do
+            echo "-- pid $p: $(cat /proc/$p/comm 2>/dev/null) state=$(grep -m1 '^State' /proc/$p/status 2>/dev/null)"
+            echo -n "   wchan: "; cat /proc/$p/wchan 2>/dev/null; echo
+            echo "   syscall: $(cat /proc/$p/syscall 2>/dev/null)"
+            echo "   kernel stack:"; head -6 /proc/$p/stack 2>/dev/null || echo "   (stack not readable)"
+          done
+          echo "=== wine.log"
+          tail -20 /tmp/wine.log
+          echo "=== kill"
+          kill -9 "$(cat /tmp/wine.pid)" 2>/dev/null
+          wineserver -k 2>/dev/null || true
