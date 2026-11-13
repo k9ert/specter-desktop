@@ -49,7 +49,7 @@ jobs:
       - name: wine + rcedit (hard 180s limit)
         run: |
           cd pyinstaller/electron
-          cat > /tmp/wine-test.js <<'JS'
+          cat > wine-test.cjs <<'JS'
           const fs = require("fs")
           const path = require("path")
           const { execWine } = require("./node_modules/app-builder-lib/out/wine")
@@ -70,8 +70,9 @@ jobs:
           })().catch(e => { console.error("WINE_FAILED", e); process.exit(1) })
           JS
           echo "=== run"
-          timeout 180 node /tmp/wine-test.js
+          timeout 180 node wine-test.cjs
           echo "=== exit=$? ($(date -u +%H:%M:%SZ))"
+          rm -f wine-test.cjs
 
       - name: Hang diagnostics
         if: always()
