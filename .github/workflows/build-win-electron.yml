@@ -9,8 +9,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version without leading v
-        default: '2.3.0'
+        description: Version as used in asset names (leading v, like the tag)
+        default: 'v2.3.0'
         required: true
       run-id:
         description: Upstream run id that holds the specterd-windows artifact
@@ -68,7 +68,6 @@ jobs:
           # up in version-data.json and drives the update/download URL.
           node ./set-version.js "$VERSION" ../dist/specterd.exe x64 cryptoadvance/specter-desktop
           cd ../..
-
       - name: Verify wine works on this runner (fail fast)
         run: |
           set +e
