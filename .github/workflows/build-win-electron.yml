@@ -1,0 +1,136 @@
+name: Build Windows Electron (one-off, fork only)
+
+# Fork-only one-off: rebuild Specter-Setup-2.3.0.exe on ubuntu-24.04 using the
+# official specterd-windows artifact from the upstream v2.3.0 tag run.
+# Needed because the tag run's Windows job hung on ubuntu-26.04 (wine/ASLR).
+# Never merge this into upstream.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without leading v
+        default: '2.3.0'
+        required: true
+      run-id:
+        description: Upstream run id that holds the specterd-windows artifact
+        default: '43053742323'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Windows installer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: electronuserland/builder:wine
+    env:
+      HOME: /tmp/electron-home
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          mkdir -p $HOME
+          for attempt in 1 2 3 4; do
+            if apt-get update && apt-get install -y unzip; then
+              exit 0
+            fi
+            echo "apt attempt $attempt failed; retrying"
+            sleep $((attempt * 15))
+          done
+          exit 1
+
+      - name: Download official specterd Windows artifact (upstream run)
+        uses: actions/download-artifact@v4
+        with:
+          name: specterd-windows
+          path: ./release-artifacts
+          repository: cryptoadvance/specter-desktop
+          run-id: ${{ inputs.run-id }}
+          github-token: ${{ secrets.UPSTREAM_TOKEN }}
+
+      - name: Prepare Electron build
+        run: |
+          VERSION="${{ inputs.version }}"
+          ls -la release-artifacts
+          mkdir -p pyinstaller/dist
+          cd release-artifacts
+          unzip "specterd-${VERSION}-win64.zip" -d ../pyinstaller/dist/
+          cd ..
+          cd pyinstaller/electron
+          npm ci
+          # repository must stay cryptoadvance/specter-desktop: this value ends
+          # up in version-data.json and drives the update/download URL.
+          node ./set-version.js "$VERSION" ../dist/specterd.exe x64 cryptoadvance/specter-desktop
+          cd ../..
+
+      - name: Verify wine works on this runner (fail fast)
+        run: |
+          set +e
+          AB="$PWD/pyinstaller/electron/node_modules/app-builder-bin/linux/x64/app-builder"
+          export SZA_PATH="$PWD/pyinstaller/electron/node_modules/7zip-bin/linux/x64/7za"
+          echo "vm.mmap_rnd_bits=$(cat /proc/sys/vm/mmap_rnd_bits 2>/dev/null)"
+          timeout 120 "$AB" download-artifact --name winCodeSign-2.6.0 \
+            --url https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z
+          V="$HOME/.cache/electron-builder/winCodeSign/winCodeSign-2.6.0"
+          cp "$V/rcedit-x64.exe" /tmp/rcedit-smoke.exe
+          timeout 120 "$AB" wine --ia32 "$V/rcedit-ia32.exe" --x64 "$V/rcedit-x64.exe" \
+            --args '["/tmp/rcedit-smoke.exe","--set-version-string","ProductName","Specter"]'
+          rc=$?
+          echo "wine/rcedit exit=$rc"
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::wine/rcedit failed or hung (exit $rc)"
+            exit 1
+          fi
+
+      - name: Build Electron app
+        run: |
+          cd pyinstaller/electron
+          cp -R ../../src/cryptoadvance/specter/static/fonts \
+                ../../src/cryptoadvance/specter/static/output.css \
+                ../../src/cryptoadvance/specter/static/typography.css .
+          attempt=0
+          until timeout -k 30 480 npm run dist -- --win; do
+            rc=$?
+            attempt=$((attempt + 1))
+            if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+              echo "::warning::electron-builder hung (exit $rc)"
+              pgrep -a -f "wine|rcedit" || true
+              wineserver -k 2>/dev/null || true
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "electron-builder failed after $attempt attempts"; exit 1
+            fi
+            sleep $((attempt * 15))
+          done
+          cd ../..
+
+      - name: Package release
+        run: |
+          VERSION="${{ inputs.version }}"
+          mkdir -p release
+          cp pyinstaller/electron/dist/*.exe "release/Specter-Setup-${VERSION}.exe"
+          ls -la release
+          test -s "release/Specter-Setup-${VERSION}.exe"
+
+      - name: Verify embedded version data
+        run: |
+          VERSION="${{ inputs.version }}"
+          node -e "
+            const data = require('./pyinstaller/electron/version-data.json');
+            console.log(data);
+            if (data.version !== process.argv[1]) throw new Error('wrong version: ' + data.version);
+            if (data.repository !== 'cryptoadvance/specter-desktop') throw new Error('wrong repository: ' + data.repository);
+            if (!/^[0-9a-f]{64}$/.test(data.sha256.x64)) throw new Error('bad sha256');
+          " "$VERSION"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-windows-${{ inputs.version }}
+          path: release/Specter-Setup-*.exe
