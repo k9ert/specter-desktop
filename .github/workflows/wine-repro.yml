@@ -58,9 +58,11 @@ jobs:
           SZA="$PWD/node_modules/7zip-bin/linux/x64/7za"
           chmod +x "$AB" "$SZA"
           export SZA_PATH="$SZA"
-          time timeout 120 "$AB" download-artifact \
+          time_start=$(date -u +%s)
+          timeout 120 "$AB" download-artifact \
             --name winCodeSign-2.6.0 \
             --url https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z
+          echo "download+unpack took $(( $(date -u +%s) - time_start ))s"
           ls "$HOME/.cache/electron-builder/winCodeSign/winCodeSign-2.6.0" | head
 
       - name: wine+rcedit, default ASLR (120s limit)
