@@ -72,10 +72,17 @@ jobs:
         run: |
           set +e
           AB="$PWD/pyinstaller/electron/node_modules/app-builder-bin/linux/x64/app-builder"
-          export SZA_PATH="$PWD/pyinstaller/electron/node_modules/7zip-bin/linux/x64/7za"
+          SZA="$PWD/pyinstaller/electron/node_modules/7zip-bin/linux/x64/7za"
+          chmod +x "$AB" "$SZA"
+          export SZA_PATH="$SZA"
           echo "vm.mmap_rnd_bits=$(cat /proc/sys/vm/mmap_rnd_bits 2>/dev/null)"
           timeout 120 "$AB" download-artifact --name winCodeSign-2.6.0 \
             --url https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z
+          dl=$?
+          if [ "$dl" -ne 0 ]; then
+            echo "::error::winCodeSign download/unpack failed (exit $dl)"
+            exit 1
+          fi
           V="$HOME/.cache/electron-builder/winCodeSign/winCodeSign-2.6.0"
           cp "$V/rcedit-x64.exe" /tmp/rcedit-smoke.exe
           timeout 120 "$AB" wine --ia32 "$V/rcedit-ia32.exe" --x64 "$V/rcedit-x64.exe" \
