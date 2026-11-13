@@ -48,31 +48,32 @@ jobs:
 
       - name: wine + rcedit (hard 180s limit)
         run: |
+          set +e
           cd pyinstaller/electron
-          cat > wine-test.cjs <<'JS'
-          const fs = require("fs")
-          const path = require("path")
-          const { execWine } = require("./node_modules/app-builder-lib/out/wine")
-          const { getSignVendorPath } = require("./node_modules/app-builder-lib/out/codeSign/windowsCodeSign")
-          ;(async () => {
-            const t0 = Date.now()
-            const vendor = await getSignVendorPath()
-            console.log("VENDOR", vendor, "after", Date.now() - t0, "ms")
-            const target = "/tmp/t.exe"
-            fs.copyFileSync(path.join(vendor, "rcedit-x64.exe"), target)
-            console.log("WINE_START", new Date().toISOString())
-            await execWine(
-              path.join(vendor, "rcedit-ia32.exe"),
-              path.join(vendor, "rcedit-x64.exe"),
-              [target, "--set-version-string", "ProductName", "Specter"]
-            )
-            console.log("WINE_DONE", new Date().toISOString(), "size", fs.statSync(target).size)
-          })().catch(e => { console.error("WINE_FAILED", e); process.exit(1) })
-          JS
-          echo "=== run"
-          timeout 180 node wine-test.cjs
-          echo "=== exit=$? ($(date -u +%H:%M:%SZ))"
-          rm -f wine-test.cjs
+          AB="$PWD/node_modules/app-builder-bin/linux/x64/app-builder"
+          SZA="$PWD/node_modules/7zip-bin/linux/x64/7za"
+          chmod +x "$AB" "$SZA"
+          export SZA_PATH="$SZA"
+          echo "app-builder binary: $AB"
+          echo "--- version"
+          "$AB" --version 2>&1 | head -3
+          VENDOR="$HOME/.cache/electron-builder/winCodeSign/winCodeSign-2.6.0"
+
+          echo "=== download+unpack START $(date -u +%H:%M:%SZ)"
+          timeout 120 "$AB" download-artifact \
+            --name winCodeSign-2.6.0 \
+            --url https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z
+          echo "=== download+unpack EXIT=$? $(date -u +%H:%M:%SZ)"
+          ls -la "$VENDOR" 2>&1 | head -12
+
+          cp "$VENDOR/rcedit-x64.exe" /tmp/t.exe
+          echo "=== wine+rcedit START $(date -u +%H:%M:%SZ)"
+          timeout 180 "$AB" wine \
+            --ia32 "$VENDOR/rcedit-ia32.exe" \
+            --x64 "$VENDOR/rcedit-x64.exe" \
+            --args '["/tmp/t.exe","--set-version-string","ProductName","Specter"]'
+          echo "=== wine+rcedit EXIT=$? $(date -u +%H:%M:%SZ)"
+          ls -la /tmp/t.exe
 
       - name: Hang diagnostics
         if: always()
