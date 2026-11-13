@@ -1,0 +1,35 @@
+name: Wine workaround probe (diagnostic, fork only)
+
+# Fork-only probe: can we fix the wine hang from *inside* the container
+# (personality/ASLR sysctl), or do we have to pin the runner image?
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe on ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.image }}
+    timeout-minutes: 10
+    container:
+      image: electronuserland/builder:wine
+    steps:
+      - name: Probe
+        run: |
+          set +e
+          echo "=== setarch (ADDR_NO_RANDOMIZE via personality)"
+          setarch "$(uname -m)" -R true; echo "setarch exit=$?"
+          echo "=== sysctl write"
+          echo 28 > /proc/sys/vm/mmap_rnd_bits; echo "sysctl write exit=$?"
+          cat /proc/sys/vm/mmap_rnd_bits
+          echo "=== docker seccomp / caps"
+          grep -E "Seccomp|CapEff" /proc/self/status
+          echo "=== wine version check"
+          wine --version; echo "wine --version exit=$?"
