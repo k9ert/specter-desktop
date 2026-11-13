@@ -1,9 +1,9 @@
 name: Wine repro (diagnostic, fork only)
 
-# Throwaway diagnostic workflow: reproduces the exact wine+rcedit step that
-# electron-builder runs for the Windows target (winPackager.signAndEditResources
-# -> getSignVendorPath -> execWine) inside the same container image, on both
-# runner images. Used to tell whether the hang is host-image specific.
+# Throwaway diagnostic workflow: reproduces the wine+rcedit step that
+# electron-builder runs for the Windows target inside the same container image,
+# on both runner images, and tries an ASLR-disabled variant.
+# Fork only — never merge.
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ jobs:
       matrix:
         image: [ubuntu-24.04, ubuntu-26.04]
     runs-on: ${{ matrix.image }}
-    timeout-minutes: 12
+    timeout-minutes: 20
     container:
       image: electronuserland/builder:wine
     env:
@@ -36,58 +36,75 @@ jobs:
           uname -a
           cat /proc/version
           echo "PAGESIZE=$(getconf PAGESIZE)"
+          echo "--- ASLR / mmap knobs"
+          for f in /proc/sys/kernel/randomize_va_space /proc/sys/vm/mmap_rnd_bits /proc/sys/vm/mmap_rnd_compat_bits; do
+            printf '%s = ' "$f"; cat "$f" 2>/dev/null || echo "(unreadable)"
+          done
           echo "--- /dev/shm"
           df -h /dev/shm || true
           echo "--- node / npm / wine"
           node -v
           npm -v
+          command -v wine || true
           wine --version || true
 
       - name: Install node modules (scripts disabled, no electron download)
         run: cd pyinstaller/electron && npm ci --ignore-scripts
 
-      - name: wine + rcedit (hard 180s limit)
+      - name: Download winCodeSign (no wine involved)
         run: |
-          set +e
           cd pyinstaller/electron
           AB="$PWD/node_modules/app-builder-bin/linux/x64/app-builder"
           SZA="$PWD/node_modules/7zip-bin/linux/x64/7za"
           chmod +x "$AB" "$SZA"
           export SZA_PATH="$SZA"
-          echo "app-builder binary: $AB"
-          echo "--- version"
-          "$AB" --version 2>&1 | head -3
-          VENDOR="$HOME/.cache/electron-builder/winCodeSign/winCodeSign-2.6.0"
-
-          echo "=== download+unpack START $(date -u +%H:%M:%SZ)"
-          timeout 120 "$AB" download-artifact \
+          time timeout 120 "$AB" download-artifact \
             --name winCodeSign-2.6.0 \
             --url https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z
-          echo "=== download+unpack EXIT=$? $(date -u +%H:%M:%SZ)"
-          ls -la "$VENDOR" 2>&1 | head -12
+          ls "$HOME/.cache/electron-builder/winCodeSign/winCodeSign-2.6.0" | head
 
-          cp "$VENDOR/rcedit-x64.exe" /tmp/t.exe
-          echo "=== wine+rcedit START $(date -u +%H:%M:%SZ)"
-          timeout 180 "$AB" wine \
-            --ia32 "$VENDOR/rcedit-ia32.exe" \
-            --x64 "$VENDOR/rcedit-x64.exe" \
-            --args '["/tmp/t.exe","--set-version-string","ProductName","Specter"]'
-          echo "=== wine+rcedit EXIT=$? $(date -u +%H:%M:%SZ)"
-          ls -la /tmp/t.exe
+      - name: wine+rcedit, default ASLR (120s limit)
+        run: |
+          set +e
+          cd pyinstaller/electron
+          AB="$PWD/node_modules/app-builder-bin/linux/x64/app-builder"
+          export SZA_PATH="$PWD/node_modules/7zip-bin/linux/x64/7za"
+          V="$HOME/.cache/electron-builder/winCodeSign/winCodeSign-2.6.0"
+          cp "$V/rcedit-x64.exe" /tmp/t1.exe
+          echo "=== START $(date -u +%H:%M:%SZ)"
+          timeout 120 "$AB" wine --ia32 "$V/rcedit-ia32.exe" --x64 "$V/rcedit-x64.exe" \
+            --args '["/tmp/t1.exe","--set-version-string","ProductName","Specter"]'
+          echo "=== EXIT=$? $(date -u +%H:%M:%SZ)"
+          wineserver -k 2>/dev/null || true
+          pkill -f wineserver 2>/dev/null || true
+
+      - name: wine+rcedit with ASLR disabled (120s limit)
+        run: |
+          set +e
+          cd pyinstaller/electron
+          AB="$PWD/node_modules/app-builder-bin/linux/x64/app-builder"
+          export SZA_PATH="$PWD/node_modules/7zip-bin/linux/x64/7za"
+          V="$HOME/.cache/electron-builder/winCodeSign/winCodeSign-2.6.0"
+          cp "$V/rcedit-x64.exe" /tmp/t2.exe
+          # PATH shim: make every "wine" invocation run under setarch -R
+          mkdir -p /tmp/shim
+          cat > /tmp/shim/wine <<'SH'
+          #!/bin/sh
+          exec setarch "$(uname -m)" -R "$(command -v /opt/wine-stable/bin/wine)" "$@"
+          SH
+          chmod +x /tmp/shim/wine
+          export PATH="/tmp/shim:$PATH"
+          echo "shim wine -> $(command -v wine)"
+          echo "=== START $(date -u +%H:%M:%SZ)"
+          timeout 120 "$AB" wine --ia32 "$V/rcedit-ia32.exe" --x64 "$V/rcedit-x64.exe" \
+            --args '["/tmp/t2.exe","--set-version-string","ProductName","Specter"]'
+          echo "=== EXIT=$? $(date -u +%H:%M:%SZ)"
+          ls -la /tmp/t2.exe
 
       - name: Hang diagnostics
         if: always()
         run: |
           echo "=== processes"
-          ps -eo pid,ppid,stat,etime,wchan:32,args | grep -iE "wine|rcedit|7za|app-builder|wineserver" | grep -v grep || echo "(none)"
-          echo "=== state of matching processes"
-          for p in $(pgrep -f "rcedit|wine|app-builder" 2>/dev/null); do
-            echo "-- pid $p"
-            cat /proc/$p/status 2>/dev/null | grep -E "^(Name|State)" || true
-            echo -n "wchan: "; cat /proc/$p/wchan 2>/dev/null || true; echo
-          done
+          ps -eo pid,ppid,stat,etime,wchan:32,args | grep -iE "wine|rcedit|app-builder|wineserver" | grep -v grep || echo "(none)"
           echo "=== dmesg tail"
           dmesg 2>/dev/null | tail -20 || echo "(dmesg not permitted)"
-          echo "=== cache dir"
-          ls -la "$HOME/.cache/electron-builder/winCodeSign" 2>/dev/null || true
-          ls -la "$HOME/.cache/electron-builder/winCodeSign/winCodeSign-2.6.0" 2>/dev/null | head || true
