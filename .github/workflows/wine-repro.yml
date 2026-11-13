@@ -1,0 +1,91 @@
+name: Wine repro (diagnostic, fork only)
+
+# Throwaway diagnostic workflow: reproduces the exact wine+rcedit step that
+# electron-builder runs for the Windows target (winPackager.signAndEditResources
+# -> getSignVendorPath -> execWine) inside the same container image, on both
+# runner images. Used to tell whether the hang is host-image specific.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wine:
+    name: wine+rcedit on ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.image }}
+    timeout-minutes: 12
+    container:
+      image: electronuserland/builder:wine
+    env:
+      HOME: /tmp/electron-home
+      DEBUG: electron-builder
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Environment info
+        run: |
+          mkdir -p "$HOME"
+          echo "runner image label : ${{ matrix.image }}"
+          uname -a
+          cat /proc/version
+          echo "PAGESIZE=$(getconf PAGESIZE)"
+          echo "--- /dev/shm"
+          df -h /dev/shm || true
+          echo "--- node / npm / wine"
+          node -v
+          npm -v
+          wine --version || true
+
+      - name: Install node modules (scripts disabled, no electron download)
+        run: cd pyinstaller/electron && npm ci --ignore-scripts
+
+      - name: wine + rcedit (hard 180s limit)
+        run: |
+          cd pyinstaller/electron
+          cat > /tmp/wine-test.js <<'JS'
+          const fs = require("fs")
+          const path = require("path")
+          const { execWine } = require("./node_modules/app-builder-lib/out/wine")
+          const { getSignVendorPath } = require("./node_modules/app-builder-lib/out/codeSign/windowsCodeSign")
+          ;(async () => {
+            const t0 = Date.now()
+            const vendor = await getSignVendorPath()
+            console.log("VENDOR", vendor, "after", Date.now() - t0, "ms")
+            const target = "/tmp/t.exe"
+            fs.copyFileSync(path.join(vendor, "rcedit-x64.exe"), target)
+            console.log("WINE_START", new Date().toISOString())
+            await execWine(
+              path.join(vendor, "rcedit-ia32.exe"),
+              path.join(vendor, "rcedit-x64.exe"),
+              [target, "--set-version-string", "ProductName", "Specter"]
+            )
+            console.log("WINE_DONE", new Date().toISOString(), "size", fs.statSync(target).size)
+          })().catch(e => { console.error("WINE_FAILED", e); process.exit(1) })
+          JS
+          echo "=== run"
+          timeout 180 node /tmp/wine-test.js
+          echo "=== exit=$? ($(date -u +%H:%M:%SZ))"
+
+      - name: Hang diagnostics
+        if: always()
+        run: |
+          echo "=== processes"
+          ps -eo pid,ppid,stat,etime,wchan:32,args | grep -iE "wine|rcedit|7za|app-builder|wineserver" | grep -v grep || echo "(none)"
+          echo "=== state of matching processes"
+          for p in $(pgrep -f "rcedit|wine|app-builder" 2>/dev/null); do
+            echo "-- pid $p"
+            cat /proc/$p/status 2>/dev/null | grep -E "^(Name|State)" || true
+            echo -n "wchan: "; cat /proc/$p/wchan 2>/dev/null || true; echo
+          done
+          echo "=== dmesg tail"
+          dmesg 2>/dev/null | tail -20 || echo "(dmesg not permitted)"
+          echo "=== cache dir"
+          ls -la "$HOME/.cache/electron-builder/winCodeSign" 2>/dev/null || true
+          ls -la "$HOME/.cache/electron-builder/winCodeSign/winCodeSign-2.6.0" 2>/dev/null | head || true
