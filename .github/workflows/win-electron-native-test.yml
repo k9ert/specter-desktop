@@ -1,0 +1,138 @@
+name: Native Windows Electron test (fork only)
+
+# Fork-only reliability test for the native windows-latest Electron build that
+# replaces the wine container job in release.yml. Runs the same steps three
+# times in parallel against the official specterd-windows artifact of the
+# upstream v2.3.0 tag run. Never merge this into upstream.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version as used in asset names (leading v, like the tag)
+        default: 'v2.3.0'
+        required: true
+      run-id:
+        description: Upstream run id that holds the specterd-windows artifact
+        default: '43053742323'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Native Windows build (attempt ${{ matrix.attempt }})
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: pyinstaller/electron/package-lock.json
+
+      - name: Download official specterd Windows artifact (upstream run)
+        uses: actions/download-artifact@v4
+        with:
+          name: specterd-windows
+          path: ./release-artifacts
+          repository: cryptoadvance/specter-desktop
+          run-id: ${{ inputs.run-id }}
+          github-token: ${{ secrets.UPSTREAM_TOKEN }}
+
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-win-${{ hashFiles('pyinstaller/electron/package-lock.json') }}
+          restore-keys: electron-win-
+
+      - name: Prepare Electron build
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          mkdir -p pyinstaller/dist
+          cd release-artifacts
+          7z x "specterd-${VERSION}-win64.zip" -o../pyinstaller/dist -y
+          cd ..
+          cd pyinstaller/electron
+          npm ci
+          node ./set-version.js "$VERSION" ../dist/specterd.exe
+          node -e "
+            const data = require('./version-data.json');
+            const expectedRepo = process.env.GITHUB_REPOSITORY || 'cryptoadvance/specter-desktop';
+            if (data.version !== '${{ inputs.version }}') throw new Error('version-data.json version mismatch: ' + data.version);
+            if (data.repository !== expectedRepo) throw new Error('version-data.json repository mismatch: ' + data.repository);
+            if (!/^[0-9a-f]{64}\$/.test(data.sha256.x64 || '')) throw new Error('version-data.json has no valid x64 sha256');
+          "
+          cd ../..
+
+      - name: Build Electron app
+        shell: bash
+        timeout-minutes: 20
+        run: |
+          cd pyinstaller/electron
+          cp -R ../../src/cryptoadvance/specter/static/fonts \
+                ../../src/cryptoadvance/specter/static/output.css \
+                ../../src/cryptoadvance/specter/static/typography.css .
+          attempt=0
+          until npm run dist -- --win; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -ge 3 ]; then
+              echo "electron-builder failed after $attempt attempts"; exit 1
+            fi
+            echo "Attempt $attempt failed; retrying in $((attempt * 15))s..."
+            sleep $((attempt * 15))
+          done
+          cd ../..
+
+      - name: Verify packaged app metadata
+        shell: bash
+        run: |
+          node -e "
+            const asar = require('./pyinstaller/electron/node_modules/@electron/asar');
+            const crypto = require('crypto');
+            const fs = require('fs');
+            const data = JSON.parse(asar.extractFile('pyinstaller/electron/dist/win-unpacked/resources/app.asar', 'version-data.json').toString());
+            if (data.repository !== process.env.GITHUB_REPOSITORY) throw new Error('Incorrect packaged repository');
+            const binary = fs.readFileSync('pyinstaller/dist/specterd.exe');
+            const expected = crypto.createHash('sha256').update(binary).digest('hex');
+            if (data.sha256.x64 !== expected) throw new Error('Incorrect packaged specterd hash');
+          "
+
+      - name: Package release
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          mkdir -p release
+          SETUP="pyinstaller/electron/dist/Specter Setup ${VERSION}.exe"
+          if [ ! -s "$SETUP" ]; then
+            SETUP=""
+            for f in pyinstaller/electron/dist/*.exe; do
+              if [ -n "$SETUP" ]; then
+                echo "Expected exactly one installer, found more than one"
+                exit 1
+              fi
+              SETUP="$f"
+            done
+          fi
+          test -s "$SETUP"
+          cp "$SETUP" "release/Specter-Setup-${VERSION}.exe"
+          ls -l release/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-windows-attempt-${{ matrix.attempt }}
+          path: release/Specter-Setup-*.exe
